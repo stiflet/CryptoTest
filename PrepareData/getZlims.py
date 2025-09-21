@@ -14,10 +14,10 @@ except Exception:  # pragma: no cover
 def _jit(fn):
     if njit is None:
         return fn
-    return njit(cache=False, fastmath=False)(fn)
+    return njit(cache=False, fastmath=True)(fn)
 
 
-@njit(cache=False, fastmath=False)
+@njit(cache=False, fastmath=True)
 def _next_true_indices_jit(cond):
     n = cond.size
     out = np.empty(n, np.int64)
@@ -28,7 +28,7 @@ def _next_true_indices_jit(cond):
         out[i] = next_idx
     return out
 
-@njit(cache=False, fastmath=False, parallel=True)
+@njit(cache=False, fastmath=True, parallel=True)
 def _sum_pairs_pos(A, B, I_pos, J_pos, last):
     total = 0.0
     m = I_pos.size
@@ -40,7 +40,7 @@ def _sum_pairs_pos(A, B, I_pos, J_pos, last):
         total += (A[i] - A[j]) / A[i] + (B[j] - B[i]) / B[i]
     return np.float64(total)
 
-@njit(cache=False, fastmath=False, parallel=True)
+@njit(cache=False, fastmath=True, parallel=True)
 def _sum_pairs_neg(A, B, I_neg, J_neg, last):
     total = 0.0
     m = I_neg.size
@@ -52,7 +52,7 @@ def _sum_pairs_neg(A, B, I_neg, J_neg, last):
         total += (A[j] - A[i]) / A[i] + (B[i] - B[j]) / B[i]
     return np.float64(total)
 
-@njit(cache=False, fastmath=False)  # sequential wrapper that builds indices
+@njit(cache=False, fastmath=True)  # sequential wrapper that builds indices
 def _mean_reversion_sum_jit(Z, A, B, rLimit, r2Limit, limit):
     n = Z.size
     last = n - 1
@@ -241,7 +241,7 @@ def get_zLimits(r1, r2 ,l, train: pd.DataFrame):
     best_rLimit, best_r2Limit, best_limit, best_profit = optimise_thresholds(r1, r2, l, train, cols)
     return best_rLimit, best_r2Limit, best_limit, best_profit
 
-def getAllzlimits(r1, r2, l, roll_window, trainCandles: pd.DataFrame, highCorr: pd.DataFrame):
+def getAllzlimits(r1, r2, l, roll_window, trainCandles: pd.DataFrame, highCorr: pd.DataFrame, save = False):
     
     rLimits, r2Limits, limits, best_profits, CoinAs, CoinBs = [], [], [], [], [], []
 
@@ -272,11 +272,13 @@ def getAllzlimits(r1, r2, l, roll_window, trainCandles: pd.DataFrame, highCorr: 
         'limit': limits,
         'bestProfit': best_profits,
     })
-    zlims.to_csv('zlimits.csv', index=False)
+    
+    if save:
+        zlims.to_csv('zlimits.csv', index=False)
     return zlims
 
 
-def getSignals(zlims, candles, roll_window):
+def getSignals(zlims, candles, roll_window, save = False):
     dfs = []
     for _, r in zlims.iterrows():
         if r.coinA not in candles.columns or r.coinB not in candles.columns:
@@ -321,7 +323,8 @@ def getSignals(zlims, candles, roll_window):
     final.set_index('time', inplace=True)
     final.dropna(inplace=True)
     
-    final.to_csv('signals_test.csv')
+    if save:
+        final.to_csv('signals_test.csv')
     
 
 

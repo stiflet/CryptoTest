@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -5,10 +6,14 @@ from dataclasses import dataclass
 from PrepareData.getZlims import getSignals, getAllzlimits
 from PrepareData.getSymbols import getHighCorrSymbols
 
+@dataclass
+class CoinPair:
+    CoinA: str
+    CoinB: str
 
-def Signals(r1, r2, l, traincandles, testcandles, corrCointegrated):
-        zlimits = getAllzlimits(r1, r2, l, traincandles, corrCointegrated)
-        signals = getSignals(zlimits, testcandles)
+def Signals(r1, r2, l, roll_window, traincandles, testcandles, corrCointegrated):
+        zlimits = getAllzlimits(r1, r2, l, roll_window, traincandles, corrCointegrated)
+        signals = getSignals(zlimits, testcandles, roll_window)
         
         return signals
         
@@ -212,7 +217,7 @@ def select_pairs(candles: pd.DataFrame, pairs: pd.DataFrame, max_std=0.1, min_pr
 
 def trainSymbols(candles: pd.DataFrame, highCorr_500: pd.DataFrame,
                  max_pairs, max_hold, 
-                 step, r1 = 10, r2=15, l = 5, 
+                 step, r1 = 10, r2=15, l = 5, roll_window = 30, 
                  train_rows_start = 1000, train_rows_end = 2200):
     
     if max_pairs != 'all':
@@ -240,7 +245,7 @@ def trainSymbols(candles: pd.DataFrame, highCorr_500: pd.DataFrame,
             
             try:    
                 highCorr_ = highCorr_500[highCorr_500['CoinA'] == symbol]
-                signals = Signals(r1,r2,l,traincandles, testcandles, highCorr_)
+                signals = Signals(r1,r2,l, roll_window, traincandles, testcandles, highCorr_)
             except Exception as e:
                 current_start = next_start
                 print(f"Error occurred: {e}")
@@ -261,11 +266,12 @@ def trainSymbols(candles: pd.DataFrame, highCorr_500: pd.DataFrame,
     return df_pairs, last_training_end
 
 def testSymbols(candles:pd.DataFrame, pairs:pd.DataFrame, 
-                r1, r2, l, max_std, min_profit, max_hold=30, 
+                r1, r2, l, max_std, min_profit, max_hold=30, roll_window = 30,
                 testStart=1200, testEnd=1800, step=200):
     
-    profit_all = []
-    profit = []
+    
+    result = []
+
     for i in range(testStart, testEnd, step):
         traincandles = candles[i-step:i]
         testcandles = candles[i:i+step].reset_index().rename(columns = {'date':'time'})
@@ -274,18 +280,19 @@ def testSymbols(candles:pd.DataFrame, pairs:pd.DataFrame,
         try:
             corr = select_pairs(traincandles, pairs, max_std, min_profit)
             
+            signals = Signals(r1, r2 ,l, roll_window,traincandles, testcandles, corr)
+            evalutation = evaluate_signals(corr, signals, max_hold)
             
-            signals = Signals(r1, r2 ,l ,traincandles, testcandles, corr)
-            result = evaluate_signals(corr, signals, max_hold)
-            
-            profit.append(result)
+            result.append(evalutation)
 
         except Exception as e:
             print(f"Error occurred: {e}")
             continue
 
             
-    df_ = pd.concat(profit)
+    df_ = pd.concat(result)
+    
+    
     
     
     print('--- Final Results ---', '\n')
@@ -295,23 +302,44 @@ def testSymbols(candles:pd.DataFrame, pairs:pd.DataFrame,
     print('Total Trades:', df_.total_trades.sum())
     print('Max Hold Time:', max_hold)
     
+    
+    return {
+        'Test_Start': testStart,
+        'Test_End': testEnd,
+        'Total_Profit': float(df_.profit.sum()),
+        'Mean_Profit_per_iteration': float(df_.groupby(level = 0).sum().profit.mean()),
+        'Max_Standard_Deviation_of_All_Pairs': float(df_.groupby(level = 0).sum()['std'].max()),
+        'Total_Trades': int(df_.total_trades.sum()),
+        'Max_Hold_Time': max_hold}
+    
 
     
 
 
 if __name__ == "__main__":
+    import os
     
-    @dataclass
-    class CoinPair:
-        CoinA: str
-        CoinB: str
-    
-    
+    os.makedirs('Test_Output', exist_ok=True)
     
     candles = pd.read_csv('Output/hist_candles_1H.csv', index_col=0, header=[0,1]).xs('close', axis=1, level=1)
-    max_hold = 5
+    candles = candles.sample(10, axis = 1)
 
+    output = {}
+    loop = 1
+
+
+    r1 = 5
+    r2 = 15
+    l = 5
+    max_hold = 5
+    roll_window = 5
+    max_std = 0.1
+    min_profit = -2
+    
+    fileName = f'Test_Output/r1={r1},r2={r2},l={l},max_hold={max_hold},roll_window={roll_window},max_std={max_std},min_profit={min_profit}.json'
+    
     print(len(candles))
+    
     for i in range(1000, 9000, 1000):
         candles_ = candles
 
@@ -321,12 +349,32 @@ if __name__ == "__main__":
         
         pairs, last_training_end = trainSymbols(candles_, highCorr_500, 
                                                 max_pairs='all', max_hold = max_hold, step = 200,
-                                                r1= 5 , r2=15, l = 5, 
+                                                r1= 5 , r2=15, l = 5, roll_window = roll_window,
                                                 train_rows_start=i-1000, train_rows_end=i)
         try:    
-            testSymbols(candles_, pairs,
+            result = testSymbols(candles_, pairs,
                         r1 = 5, r2 = 15, l = 5, 
-                        max_std = 0.1, min_profit = 0.2, max_hold=max_hold, 
+                        max_std = 0.1, min_profit = -2, max_hold=max_hold, roll_window = roll_window,
                         testStart=last_training_end, testEnd=last_training_end + 1000, step=200)
+            
+            
+            result['train_start'] = i - 1000
+            result['train_end'] = i
+            
+            output.update(
+                {f'Loop_{loop}': result}
+                )
+            
+            
+            with open(fileName, 'w') as f:
+                json.dump(output, f, indent = 4)
+                
+                
+                
         except:
-            continue
+            pass
+        
+        loop += 1
+        
+        
+
