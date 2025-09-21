@@ -1,32 +1,9 @@
-import os
-from tqdm import tqdm
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["NUMEXPR_MAX_THREADS"] = "1"
-os.environ["MKL_THREADING_LAYER"] = "INTEL"   # helps MKL+OpenMP combos
-import faulthandler; faulthandler.enable()
-
-
 import numpy as np
-from getSymbols import getSignals, getAllzlimits
 import pandas as pd
-from PrepareData.CoinTegrate import cointegrate
+from tqdm import tqdm
 from dataclasses import dataclass
-
-
-def getHighCorrSymbols(candles: pd.DataFrame, save: bool = False):
-
-    dfCorr = candles.corr()    
-    np.fill_diagonal(dfCorr.values, 0)
-
-    df = pd.DataFrame(dfCorr.where(dfCorr > 0.9).stack().index.tolist(), columns=['CoinA', 'CoinB'])
-    
-    symbols = df
-    if save:
-        symbols.to_csv('Output/high_corr_symbols.csv', index=False)
-        
-    return symbols
+from PrepareData.getZlims import getSignals, getAllzlimits
+from PrepareData.getSymbols import getHighCorrSymbols
 
 
 def Signals(r1, r2, l, traincandles, testcandles, corrCointegrated):

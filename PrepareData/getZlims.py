@@ -2,12 +2,12 @@
 import numpy as np
 import pandas as pd
 from scipy.optimize import differential_evolution
-from tqdm import tqdm
+
 
 
 # ---------- optional numba accel --------------------------------------
 try:
-    from numba import njit
+    from numba import njit, prange
 except Exception:  # pragma: no cover
     njit = None
 
@@ -16,10 +16,6 @@ def _jit(fn):
         return fn
     return njit(cache=False, fastmath=False)(fn)
 
-# ---------- ultra-fast primitives -------------------------------------
-
-
-from numba import njit, prange
 
 @njit(cache=False, fastmath=False)
 def _next_true_indices_jit(cond):
@@ -206,24 +202,12 @@ def objective_safe(x, *args):
 
 
 def optimise_thresholds(r1, r2, l, dfNorm: pd.DataFrame, cols: list[str]):
-    # Extract arrays ONCE (contiguous, float32 to reduce bandwidth)
-    """Z = dfNorm['Zscore'].to_numpy(copy=False)
-    A = dfNorm[cols[0]].to_numpy(copy=False)
-    B = dfNorm[cols[1]].to_numpy(copy=False)"""
+
     Z = np.ascontiguousarray(dfNorm['Zscore'].to_numpy(copy=False), dtype=np.float64)
     A = np.ascontiguousarray(dfNorm[cols[0]].to_numpy(copy=False),   dtype=np.float64)
     B = np.ascontiguousarray(dfNorm[cols[1]].to_numpy(copy=False),   dtype=np.float64)
 
-    """# Tighten bounds to data to avoid useless search space
-    zmax = float(np.nanmax(Z))
-    zmin = float(np.nanmin(Z))
-    r_hi = max(1.5, min(10.0, max(abs(zmax), abs(zmin))))
-    bounds = [
-        (1.5, r_hi),   # rLimit
-        (1.5, max(20.0, r_hi + 1.0)),   # r2Limit (> rLimit)
-        (-1.5, 1.5)    # limit
-    ]"""
-    
+
     bounds = [
     (1.5, r1),   # rLimit
     (1.5, r2),   # r2Limit (must end up > rLimit)
@@ -235,13 +219,13 @@ def optimise_thresholds(r1, r2, l, dfNorm: pd.DataFrame, cols: list[str]):
         bounds=bounds,
         args=(Z, A, B),
         strategy="best1bin",
-        popsize=40,         # slightly leaner for speed; bump if you want
+        popsize=40,
         tol=1e-4,
-        maxiter=1000,        # trimmed a bit — JIT makes each eval cheap anyway
+        maxiter=1000,
         polish=True,
         seed=42,
         disp=False,
-        workers=1,         # safe: objective is pure-NumPy/Numba
+        workers=1,
         updating='deferred',
 
     )
@@ -252,25 +236,23 @@ def optimise_thresholds(r1, r2, l, dfNorm: pd.DataFrame, cols: list[str]):
 
     return np.float64(best_rLimit), np.float64(best_r2Limit), np.float64(best_limit), np.float64(best_profit)
 
-def get_zLimits(r1, r2 ,l, train: pd.DataFrame, trainStart=None, trainEnd=200, loop_limit=10):
-    cols = train.columns.tolist()  # assumes first two are coinA, coinB
+def get_zLimits(r1, r2 ,l, train: pd.DataFrame):
+    cols = train.columns.tolist()
     best_rLimit, best_r2Limit, best_limit, best_profit = optimise_thresholds(r1, r2, l, train, cols)
     return best_rLimit, best_r2Limit, best_limit, best_profit
 
-def getAllzlimits(r1, r2, l, trainCandles: pd.DataFrame, highCorr: pd.DataFrame):
+def getAllzlimits(r1, r2, l, roll_window, trainCandles: pd.DataFrame, highCorr: pd.DataFrame):
     
     rLimits, r2Limits, limits, best_profits, CoinAs, CoinBs = [], [], [], [], [], []
 
-    # iterate; DE runs in parallel inside each iteration
-    #with tqdm(total=len(highCorr), desc="Optimizing Z-limits") as pbar:
     for r in highCorr.itertuples(index=True):
         try:
             coinPair = trainCandles[[r.CoinA, r.CoinB]].copy()
 
-            # Rolling stats in C (accelerated by Bottleneck if installed)
+
             coinPair['Spread'] = coinPair[r.CoinA] - coinPair[r.CoinB]
             spread_mean = coinPair['Spread'].rolling(5, min_periods=5).mean()
-            sigma = spread_mean.rolling(30, min_periods=30).std()
+            sigma = spread_mean.rolling(roll_window, min_periods=roll_window).std()
             coinPair['Zscore'] = (coinPair['Spread'] - spread_mean) / sigma
             coinPair.dropna(inplace=True)
 
@@ -279,10 +261,8 @@ def getAllzlimits(r1, r2, l, trainCandles: pd.DataFrame, highCorr: pd.DataFrame)
             rLimits.append(rLimit); r2Limits.append(r2Limit); limits.append(limit)
             CoinAs.append(r.CoinA); CoinBs.append(r.CoinB); best_profits.append(best_profit)
         except Exception:
-            #pbar.update(1)
             continue
         
-            pbar.update(1)
 
     zlims = pd.DataFrame({
         'coinA': CoinAs,
@@ -291,20 +271,13 @@ def getAllzlimits(r1, r2, l, trainCandles: pd.DataFrame, highCorr: pd.DataFrame)
         'r2Limit': r2Limits,
         'limit': limits,
         'bestProfit': best_profits,
-        #'qty_A': highCorr['qty_A_units'],
-        #'units_B': highCorr['qty_B_units_beta'],
-        #'notional_B_usdt_beta': highCorr['notional_B_usdt_beta']
-        
     })
     zlims.to_csv('zlimits.csv', index=False)
     return zlims
 
 
-
-
-def getSignals(zlims, candles):
+def getSignals(zlims, candles, roll_window):
     dfs = []
-    idx = []
     for _, r in zlims.iterrows():
         if r.coinA not in candles.columns or r.coinB not in candles.columns:
             print(f"⛔ Skipping: {r.coinA}-{r.coinB} not in candles")
@@ -314,20 +287,13 @@ def getSignals(zlims, candles):
         
         coinPair['Spread'] = coinPair[r.coinA] - coinPair[r.coinB]
         coinPair['SpreadMean'] = coinPair['Spread'].rolling(5).mean()
-        sigma = coinPair['SpreadMean'].rolling(30).std()
+        sigma = coinPair['SpreadMean'].rolling(roll_window).std()
         coinPair['Zscore'] = (coinPair['Spread'] - coinPair['SpreadMean'])/sigma
-
-
         coinPair.dropna(inplace=True)
 
-        
-        #zlimits = zlims[zlims['coinA'].str.contains(r.coinA) & zlims['coinB'].str.contains(r.coinB)]
         rLimit = r['rLimit']
         r2Limit = r['r2Limit']
         limit = r['limit']
-
-        
-
         
         coinPair['Signal'] = coinPair['Zscore'].apply(lambda x:
             1 if x >= rLimit else
@@ -347,14 +313,10 @@ def getSignals(zlims, candles):
         
     
         df_result.columns = pd.MultiIndex.from_product([[f"{coinPair.columns[0]}-{coinPair.columns[1]}"], df_result.columns])
-        
-
-        
         dfs.append(df_result)
                 
 
     final = pd.concat(dfs, join='outer', axis=1)
-    
     final['time'] = candles.time
     final.set_index('time', inplace=True)
     final.dropna(inplace=True)
@@ -366,8 +328,6 @@ def getSignals(zlims, candles):
     return final
 if __name__ == '__main__':
     corr = pd.read_csv('Output/zlimSymbols.csv')
-    #corr = corr[corr.CoinA == 'GRTUSDT']
-    #getHistCandles(corr, gran='1H', loops = 1, save = True)
     candles = pd.read_csv('Output/hist_candles_1H.csv')
     print(candles)
     getAllzlimits(trainCandles=candles, highCorr=corr)

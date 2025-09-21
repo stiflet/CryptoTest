@@ -2,9 +2,17 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from statsmodels.tsa.stattools import coint
-from GetData.getData import getHistCandles
 from tqdm import tqdm
 
+
+def getHighCorrSymbols(candles: pd.DataFrame, save: bool = False):
+    dfCorr = candles.corr()    
+    np.fill_diagonal(dfCorr.values, 0)
+    symbols = pd.DataFrame(dfCorr.where(dfCorr > 0.9).stack().index.tolist(), columns=['CoinA', 'CoinB'])
+    
+    if save:
+        symbols.to_csv('Output/high_corr_symbols.csv', index=False)    
+    return symbols
 
 
 def cointegrate(candles, highCorr, BASE_UNITS_A = None, BASE_NOTIONAL_A = 20.0, MAX_KEEP = 200, MIN_OBS = 50, PVAL_THRESH = 0.05):
@@ -74,28 +82,11 @@ def cointegrate(candles, highCorr, BASE_UNITS_A = None, BASE_NOTIONAL_A = 20.0, 
         if len(results) >= MAX_KEEP:
             break
 
-    results_candles = pd.DataFrame(results)#.sort_values('p_value')
+    results_candles = pd.DataFrame(results)
     results_candles.to_csv('Output/zlimSymbols.csv', index=False)
     
     return results_candles
 
-
-
-
-if __name__ == '__main__':
-    highCorr =pd.read_csv('Output/high_corr_symbols.csv').sample(1000) 
-    symbols = highCorr.stack().unique().tolist()
-    candles = getHistCandles(symbols, gran = '1H', loops = 1)
-    candles = candles.xs('close', 1, 1)
-    
-    BASE_UNITS_A    = None      # e.g., 1.0  (units of CoinA)
-    BASE_NOTIONAL_A = 20.0   # e.g., 1000 USDT to allocate to CoinA
-    MAX_KEEP        = 200
-    MIN_OBS         = 50
-    PVAL_THRESH     = 0.05
-    
-
-    cointegrate(candles, highCorr, BASE_UNITS_A, BASE_NOTIONAL_A, MAX_KEEP, MIN_OBS, PVAL_THRESH)
     
     
     
