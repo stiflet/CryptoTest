@@ -29,8 +29,8 @@ def getHighCorrSymbols(candles: pd.DataFrame, save: bool = False):
     return symbols
 
 
-def Signals(r2, traincandles, testcandles, corrCointegrated):
-        zlimits = getAllzlimits(r2, traincandles, corrCointegrated)
+def Signals(r1, r2, l, traincandles, testcandles, corrCointegrated):
+        zlimits = getAllzlimits(r1, r2, l, traincandles, corrCointegrated)
         signals = getSignals(zlimits, testcandles)
         
         return signals
@@ -71,9 +71,9 @@ def evaluate_signals(corrCointegrated, signals, max_hold=30) -> pd.DataFrame:
                         priceA_buy = r2.coinA * sizeA
                         priceB_short = r2.coinB * sizeB
                         
-                        profit1 = (priceA_short - priceA_buy) / priceA_short - 0.0012
-                        profit2 = (priceB_short - priceB_buy) / priceB_buy - 0.0012
-                        profits.append(profit1 + profit2)
+                        profits.append((priceA_short - priceA_buy) / priceA_short - 0.0012)
+                        profits.append((priceB_short - priceB_buy) / priceB_buy - 0.0012)
+
                         break
                 
                         
@@ -232,18 +232,11 @@ def select_pairs(candles: pd.DataFrame, pairs: pd.DataFrame, max_std=0.1, min_pr
     selected_pairs = pd.DataFrame({'CoinA': coinA, 'CoinB': coinB})
     return selected_pairs
 
-def makeCoinPairs(best_pairs):
-    
-    coinA = [p.split('-')[0] for p in best_pairs.index[0]]
-    coinB = [p.split('-')[1] for p in best_pairs.index[0]]
 
-    coins = pd.DataFrame({'CoinA': coinA, 'CoinB': coinB})
-
-    return coins
-
-
-
-def trainSymbols(candles: pd.DataFrame, highCorr_500: pd.DataFrame, max_pairs, step, r2=15, train_rows_start = 1000, train_rows_end = 2200):
+def trainSymbols(candles: pd.DataFrame, highCorr_500: pd.DataFrame,
+                 max_pairs, max_hold, 
+                 step, r1 = 10, r2=15, l = 5, 
+                 train_rows_start = 1000, train_rows_end = 2200):
     
     if max_pairs != 'all':
         symbols = highCorr_500['CoinA'].sample(max_pairs).unique().tolist()
@@ -253,90 +246,62 @@ def trainSymbols(candles: pd.DataFrame, highCorr_500: pd.DataFrame, max_pairs, s
         symbols = highCorr_500['CoinA'].unique().tolist()
         print('Total Amount of Unique Symbols:', len(symbols))
 
+    
+
     dfs = []
+    last_training_end = None
     for _,symbol in zip(tqdm(range(len(symbols))), symbols):
-        
-        
-        
+        current_start = train_rows_start
         
         while True:
-            traincandles = candles[train_rows_start:train_rows_start + step]
-            testcandles = candles[train_rows_start + step: train_rows_start + step + step]
-            testcandles.reset_index(inplace = True)
+            next_start = current_start + step
+            if next_start >= train_rows_end:
+                break
 
-            testcandles = testcandles.rename(columns = {'date':'time'})
+            traincandles = candles[current_start:next_start]
+            testcandles = candles[next_start: next_start + step].reset_index().rename(columns = {'date':'time'})
             
-
-            try:
-                
-                #corrCointegrated = corrCointegrated[corrCointegrated.isin(candles.columns)].dropna()
-                #corrCointegrated = cointegrate(traincandles, highCorr_, MAX_KEEP=len(candles.columns))
-                #highCorr_ = getHighCorrSymbols(traincandles)
-                
+            try:    
                 highCorr_ = highCorr_500[highCorr_500['CoinA'] == symbol]
-                
-                signals = Signals(r2,traincandles, testcandles, highCorr_)
+                signals = Signals(r1,r2,l,traincandles, testcandles, highCorr_)
             except Exception as e:
+                current_start = next_start
                 print(f"Error occurred: {e}")
                 continue
 
-            result = evaluate_signals(highCorr_, signals, max_hold=50)
-            
-            #print(result.profit.sum())
-            
+            result = evaluate_signals(highCorr_, signals, max_hold)
             dfs.append(result)
         
-            if train_rows_start >= train_rows_end:
-                break
-            train_rows_start += step
-        
+            last_training_end = next_start + step
+            current_start = next_start
 
-            
-        
+    if not dfs:
+        raise ValueError("No training windows were generated before reaching train_rows_end.")
 
-        
-        
-
-
-        #pair = pd.concat(dfs).groupby(level=0).sum().sort_values(0, ascending=False)
-        #best_pairs.append(pair)
-
-
-    #print(dfs)
-
-    df_pairs = pd.concat(dfs)#.groupby(level=0).sum().sort_values('profit', ascending=False)
+    df_pairs = pd.concat(dfs)
     df_pairs.index = pd.MultiIndex.from_arrays([df_pairs.index.str.split('-').str[0], df_pairs.index.str.split('-').str[1]], names=['CoinA', 'CoinB'])
     df_pairs.to_csv('Output/best_pairs.csv')
-    return df_pairs
+    return df_pairs, last_training_end
 
-def testSymbols(candles:pd.DataFrame, pairs:pd.DataFrame, max_hold=30, train_step=200, test_step=200, testStart=1200, testEnd=1800):
+def testSymbols(candles:pd.DataFrame, pairs:pd.DataFrame, 
+                r1, r2, l, max_std, min_profit, max_hold=30, 
+                testStart=1200, testEnd=1800, step=200):
     
     profit_all = []
     profit = []
-    train_step = 200
-    test_step = 200
-    r2 = 15
-    
-    for i in range(testStart, testEnd, train_step):
-        traincandles = candles[i-train_step:i]
-    
-        testcandles = candles[i:i+test_step]
-        testcandles.reset_index(inplace = True)
-        testcandles = testcandles.rename(columns = {'date':'time'})
-        
-        #highCorr = getHighCorrSymbols(traincandles)
+    for i in range(testStart, testEnd, step):
+        traincandles = candles[i-step:i]
+        testcandles = candles[i:i+step].reset_index().rename(columns = {'date':'time'})
+
     
         try:
-            #corr = getHighCorrSymbols(traincandles[coins.values.flatten()])
-            corr = select_pairs(traincandles, pairs, max_std=0.1, min_profit=0)
+            corr = select_pairs(traincandles, pairs, max_std, min_profit)
             
             
-            signals = Signals(r2,traincandles, testcandles, corr)
+            signals = Signals(r1, r2 ,l ,traincandles, testcandles, corr)
             result = evaluate_signals(corr, signals, max_hold)
             
             profit.append(result)
-            
-            #print(max(result['std']))
 
         except Exception as e:
             print(f"Error occurred: {e}")
@@ -358,46 +323,33 @@ def testSymbols(candles:pd.DataFrame, pairs:pd.DataFrame, max_hold=30, train_ste
 
 
 if __name__ == "__main__":
-    import multiprocessing as mp
     
     @dataclass
     class CoinPair:
         CoinA: str
         CoinB: str
-        
-    mp.set_start_method("spawn", force=True)
+    
     
     
     candles = pd.read_csv('Output/hist_candles_1H.csv', index_col=0, header=[0,1]).xs('close', axis=1, level=1)
-    
-    for i in range(1000, 8000, 1000):
-        candles_ = candles.sample(30, axis = 1)
+    max_hold = 5
+
+    print(len(candles))
+    for i in range(1000, 9000, 1000):
+        candles_ = candles
+
+        
 
         highCorr_500 = getHighCorrSymbols(candles_[i-1000:i])
-        #highCorr_500 = cointegrate(candles_[i-1000:i], highCorr, MAX_KEEP=10000)['CoinA CoinB'.split()][:30]
         
-        #symbols = pd.read_csv('Output/high_corr_symbols.csv').sample(500)
-
-
-        pairs = trainSymbols(candles_, highCorr_500, max_pairs='all', step=200, r2=15, train_rows_start=i-1000, train_rows_end=i)
-
-        pairs = pd.read_csv('Output/best_pairs.csv', index_col=[0,1])
-        
-        #print(pairs)
-        
-        max_std = 0.1
-        min_profit = 0
-        
-
-        #pairs = pairs.sort_values('profit', ascending=False).reset_index()
-        #pairs = pairs[pairs['std'] < 0.1]
-        
-        
-        #coins = pairs['CoinA CoinB'.split()][:10]
-
-        #print(pairs)
-        testSymbols(candles_, pairs, max_hold=15, train_step=200, test_step=200, testStart=i + 200, testEnd=i + 1200)
-
-        
-
-
+        pairs, last_training_end = trainSymbols(candles_, highCorr_500, 
+                                                max_pairs='all', max_hold = max_hold, step = 200,
+                                                r1= 5 , r2=15, l = 5, 
+                                                train_rows_start=i-1000, train_rows_end=i)
+        try:
+            testSymbols(candles_, pairs,
+                        r1 = 5, r2 = 15, l = 5, 
+                        max_std = 0.1, min_profit = 0.2, max_hold=max_hold, 
+                        testStart=last_training_end, testEnd=last_training_end + 1000, step=200)
+        except:
+            continue

@@ -205,7 +205,7 @@ def objective_safe(x, *args):
     return val
 
 
-def optimise_thresholds(r2, dfNorm: pd.DataFrame, cols: list[str]):
+def optimise_thresholds(r1, r2, l, dfNorm: pd.DataFrame, cols: list[str]):
     # Extract arrays ONCE (contiguous, float32 to reduce bandwidth)
     """Z = dfNorm['Zscore'].to_numpy(copy=False)
     A = dfNorm[cols[0]].to_numpy(copy=False)
@@ -225,9 +225,9 @@ def optimise_thresholds(r2, dfNorm: pd.DataFrame, cols: list[str]):
     ]"""
     
     bounds = [
-    (1.5, 10),   # rLimit
+    (1.5, r1),   # rLimit
     (1.5, r2),   # r2Limit (must end up > rLimit)
-    (-1.5, 1.5)  # limit
+    (-1.5, l)  # limit
     ]
 
     result = differential_evolution(
@@ -252,12 +252,12 @@ def optimise_thresholds(r2, dfNorm: pd.DataFrame, cols: list[str]):
 
     return np.float64(best_rLimit), np.float64(best_r2Limit), np.float64(best_limit), np.float64(best_profit)
 
-def get_zLimits(r2, train: pd.DataFrame, trainStart=None, trainEnd=200, loop_limit=10):
+def get_zLimits(r1, r2 ,l, train: pd.DataFrame, trainStart=None, trainEnd=200, loop_limit=10):
     cols = train.columns.tolist()  # assumes first two are coinA, coinB
-    best_rLimit, best_r2Limit, best_limit, best_profit = optimise_thresholds(r2, train, cols)
+    best_rLimit, best_r2Limit, best_limit, best_profit = optimise_thresholds(r1, r2, l, train, cols)
     return best_rLimit, best_r2Limit, best_limit, best_profit
 
-def getAllzlimits(r2, trainCandles: pd.DataFrame, highCorr: pd.DataFrame):
+def getAllzlimits(r1, r2, l, trainCandles: pd.DataFrame, highCorr: pd.DataFrame):
     
     rLimits, r2Limits, limits, best_profits, CoinAs, CoinBs = [], [], [], [], [], []
 
@@ -274,7 +274,7 @@ def getAllzlimits(r2, trainCandles: pd.DataFrame, highCorr: pd.DataFrame):
             coinPair['Zscore'] = (coinPair['Spread'] - spread_mean) / sigma
             coinPair.dropna(inplace=True)
 
-            rLimit, r2Limit, limit, best_profit = get_zLimits(r2, coinPair)
+            rLimit, r2Limit, limit, best_profit = get_zLimits(r1, r2 ,l, coinPair)
 
             rLimits.append(rLimit); r2Limits.append(r2Limit); limits.append(limit)
             CoinAs.append(r.CoinA); CoinBs.append(r.CoinB); best_profits.append(best_profit)

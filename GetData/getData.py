@@ -98,6 +98,6 @@ async def getHistCandles(symbols, gran, loops=5, separate: bool = False, save: b
 
 if __name__ == '__main__':
 
-    symbols = pd.read_csv('Output/zlimSymbols.csv')['CoinA CoinB'.split()].stack().unique().tolist()
+    #symbols = pd.read_csv('Output/zlimSymbols.csv')['CoinA CoinB'.split()].stack().unique().tolist()
     symbols = pd.read_csv(r'PrepareData/Data/high_corr_symbols.csv').stack().unique().tolist()
     getHistCandles(symbols, gran='1H', loops=50)
