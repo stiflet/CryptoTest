@@ -98,14 +98,14 @@ def evaluate_signals(corrCointegrated, signals, max_hold=30) -> pd.DataFrame:
     return df_result
 
 
-def getZcores2(trainCandles: pd.DataFrame, highCorr: list) -> pd.DataFrame:
+def getZcores2(trainCandles: pd.DataFrame, highCorr: list, roll_window: int) -> pd.DataFrame:
     """Build z-scores for each CoinA-CoinB column. Robust to NaNs."""
     zscores = []
     for r in highCorr:
         coinPair = trainCandles[[r.CoinA, r.CoinB]].copy()
         spread = coinPair[r.CoinA] - coinPair[r.CoinB]
         spread_mean = spread.rolling(5, min_periods=5).mean()
-        sigma = spread_mean.rolling(30, min_periods=30).std()
+        sigma = spread_mean.rolling(roll_window, min_periods=30).std()
         zscore = (spread - spread_mean) / sigma
         col_name = f"{r.CoinA}-{r.CoinB}"
         zscores.append(zscore.rename(col_name))
@@ -180,7 +180,7 @@ def getLowestCorrPairs(corr_: pd.DataFrame, k: int = 10, criterion: str = "mean"
 
     return selected
 
-def select_pairs(candles: pd.DataFrame, pairs: pd.DataFrame, max_std=0.1, min_profit=0.2):
+def select_pairs(candles: pd.DataFrame, pairs: pd.DataFrame, max_std=0.1, min_profit=0.2, roll_window=30):
     from dataclasses import dataclass
 
     @dataclass
@@ -197,7 +197,7 @@ def select_pairs(candles: pd.DataFrame, pairs: pd.DataFrame, max_std=0.1, min_pr
     pairs_dataClass = [CoinPair(r[0], r[1]) for r in filt_idx]
 
     # Build z-scores and correlation matrix
-    zscores = getZcores2(candles, pairs_dataClass)
+    zscores = getZcores2(candles, pairs_dataClass, roll_window)
     if zscores.shape[1] == 0:
         return pd.DataFrame(columns=['CoinA', 'CoinB'])
 
@@ -278,7 +278,7 @@ def testSymbols(candles:pd.DataFrame, pairs:pd.DataFrame,
 
     
         try:
-            corr = select_pairs(traincandles, pairs, max_std, min_profit)
+            corr = select_pairs(traincandles, pairs, max_std, min_profit, roll_window)
             
             signals = Signals(r1, r2 ,l, roll_window,traincandles, testcandles, corr)
             evalutation = evaluate_signals(corr, signals, max_hold)
@@ -322,7 +322,10 @@ if __name__ == "__main__":
     os.makedirs('Test_Output', exist_ok=True)
     
     candles = pd.read_csv('Output/hist_candles_1H.csv', index_col=0, header=[0,1]).xs('close', axis=1, level=1)
-    candles = candles.sample(10, axis = 1)
+    #candles = candles.sample(30, axis = 1)
+    
+    #candles.to_csv('Output/sample_candles.csv')
+    
 
     output = {}
     loop = 1
@@ -332,9 +335,9 @@ if __name__ == "__main__":
     r2 = 15
     l = 5
     max_hold = 5
-    roll_window = 5
+    roll_window = 30
     max_std = 0.1
-    min_profit = -2
+    min_profit = 0.2
     
     fileName = f'Test_Output/r1={r1},r2={r2},l={l},max_hold={max_hold},roll_window={roll_window},max_std={max_std},min_profit={min_profit}.json'
     
@@ -348,14 +351,14 @@ if __name__ == "__main__":
         highCorr_500 = getHighCorrSymbols(candles_[i-1000:i])
         
         pairs, last_training_end = trainSymbols(candles_, highCorr_500, 
-                                                max_pairs='all', max_hold = max_hold, step = 200,
-                                                r1= 5 , r2=15, l = 5, roll_window = roll_window,
+                                                max_pairs='all', max_hold = max_hold, step = 500,
+                                                r1= r1 , r2= r2, l = l, roll_window = roll_window,
                                                 train_rows_start=i-1000, train_rows_end=i)
         try:    
             result = testSymbols(candles_, pairs,
-                        r1 = 5, r2 = 15, l = 5, 
-                        max_std = 0.1, min_profit = -2, max_hold=max_hold, roll_window = roll_window,
-                        testStart=last_training_end, testEnd=last_training_end + 1000, step=200)
+                        r1 = r1, r2 = r2, l = l, 
+                        max_std = max_std, min_profit = min_profit, max_hold=max_hold, roll_window = roll_window,
+                        testStart=last_training_end, testEnd=last_training_end + 1000, step=500)
             
             
             result['train_start'] = i - 1000
