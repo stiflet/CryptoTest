@@ -346,7 +346,7 @@ if __name__ == "__main__":
                                                 max_pairs='all', max_hold = max_hold, step = 200,
                                                 r1= 5 , r2=15, l = 5, 
                                                 train_rows_start=i-1000, train_rows_end=i)
-        try:
+        try:    
             testSymbols(candles_, pairs,
                         r1 = 5, r2 = 15, l = 5, 
                         max_std = 0.1, min_profit = 0.2, max_hold=max_hold, 
