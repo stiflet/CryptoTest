@@ -252,7 +252,7 @@ def getAllzlimits(r1, r2, l, roll_window, trainCandles: pd.DataFrame, highCorr: 
 
             coinPair['Spread'] = coinPair[r.CoinA] - coinPair[r.CoinB]
             spread_mean = coinPair['Spread'].rolling(5, min_periods=5).mean()
-            sigma = spread_mean.rolling(roll_window, min_periods=roll_window).std()
+            sigma = spread_mean.rolling(roll_window).std()
             coinPair['Zscore'] = (coinPair['Spread'] - spread_mean) / sigma
             coinPair.dropna(inplace=True)
 

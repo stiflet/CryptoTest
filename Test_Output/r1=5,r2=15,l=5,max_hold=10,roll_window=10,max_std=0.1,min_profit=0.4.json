@@ -1,0 +1,13 @@
+{
+    "Loop_1": {
+        "Test_Start": 1000,
+        "Test_End": 2000,
+        "Total_Profit": -2.7835040843013443,
+        "Mean_Profit_per_iteration": -0.2783504084301345,
+        "Max_Standard_Deviation_of_All_Pairs": 0.204676374042518,
+        "Total_Trades": 4650,
+        "Max_Hold_Time": 10,
+        "train_start": 0,
+        "train_end": 1000
+    }
+}

@@ -1,0 +1,35 @@
+{
+    "Loop_1": {
+        "Test_Start": 3000,
+        "Test_End": 4000,
+        "Total_Profit": 0.09317057026783675,
+        "Mean_Profit_per_iteration": 0.002588071396328799,
+        "Max_Standard_Deviation_of_All_Pairs": 0.09360470218342526,
+        "Total_Trades": 1276,
+        "Max_Hold_Time": 5,
+        "train_start": 2000,
+        "train_end": 3000
+    },
+    "Loop_2": {
+        "Test_Start": 4000,
+        "Test_End": 5000,
+        "Total_Profit": 2.0996697881101265,
+        "Mean_Profit_per_iteration": 0.09543953582318752,
+        "Max_Standard_Deviation_of_All_Pairs": 0.244799851882136,
+        "Total_Trades": 1192,
+        "Max_Hold_Time": 5,
+        "train_start": 3000,
+        "train_end": 4000
+    },
+    "Loop_3": {
+        "Test_Start": 5000,
+        "Test_End": 6000,
+        "Total_Profit": 0.5675048010853353,
+        "Mean_Profit_per_iteration": 0.014551405156034241,
+        "Max_Standard_Deviation_of_All_Pairs": 0.15844295876711556,
+        "Total_Trades": 1384,
+        "Max_Hold_Time": 5,
+        "train_start": 4000,
+        "train_end": 5000
+    }
+}
