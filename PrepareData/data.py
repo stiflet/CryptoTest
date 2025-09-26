@@ -133,7 +133,7 @@ class Load():
     
     def cointegrate(self, BASE_UNITS_A = None, BASE_NOTIONAL_A = 20.0, MAX_KEEP = 200, MIN_OBS = 50, PVAL_THRESH = 0.05):
         
-        highCorr = self.correlate(self.candles)
+        highCorr = self.correlate()
         results = []
         pbar = tqdm(total=MAX_KEEP, desc="Processing zlimits pairs")
         for r in highCorr.itertuples(index=False):
@@ -205,16 +205,6 @@ class Load():
         
         return results_candles
     
-    
-
-
-
-
-        
-        
-        
-
-
 if __name__ == '__main__':
 
     btc = Load(['BTCUSDT', 'ETHUSDT'], gran='1H', loops=2)
