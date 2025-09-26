@@ -1,4 +1,6 @@
+%%writefile /kaggle/working/CryptoTest/PrepareData/data.py
 from curl_cffi.requests import AsyncSession
+from curl_cffi import requests
 import pandas as pd
 import asyncio
 import os
@@ -10,13 +12,23 @@ import statsmodels.api as sm
 from statsmodels.tsa.stattools import coint
 
 os.makedirs('Output', exist_ok=True)
-
-
 def runAsync(function):
     def wrapper(*args, **kwargs):
         return asyncio.run(function(*args, **kwargs))
     return wrapper
 
+
+def getSymbols(minVol: int, save:bool = False):
+    url = 'https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES'
+    response = requests.get(url)
+    df = pd.DataFrame(response.json()['data'])
+    df = df[pd.to_numeric(df['usdtVolume']) > minVol]
+    df = df['symbol'].tolist()
+    if save:
+        
+        df.to_csv('Output/symbols.csv', index=False)
+        
+    return df
 
 
 async def getData(session, symbol, gran, startTime, endTime, semaphore, limit=200) -> pd.DataFrame:
@@ -26,6 +38,7 @@ async def getData(session, symbol, gran, startTime, endTime, semaphore, limit=20
         retries = 0
         while retries < 5:
             response = await session.get(url)
+            print(response.status_code)
             if response.status_code != 200:
                 retries += 1
                 await asyncio.sleep(2)
@@ -211,7 +224,3 @@ if __name__ == '__main__':
     print(btc.candles)
     
     print(btc.cointegrate())
-    
-
-
-
