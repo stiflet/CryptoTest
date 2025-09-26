@@ -1,3 +1,4 @@
+%%writefile /kaggle/working/CryptoTest/PrepareData/data.py
 from curl_cffi.requests import AsyncSession
 from curl_cffi import requests
 import pandas as pd
@@ -37,7 +38,6 @@ async def getData(session, symbol, gran, startTime, endTime, semaphore, limit=20
         retries = 0
         while retries < 5:
             response = await session.get(url)
-            print(response.status_code)
             if response.status_code != 200:
                 retries += 1
                 await asyncio.sleep(2)
@@ -106,28 +106,12 @@ async def getHistCandles(symbols, gran, loops=5, separate: bool = False, save: b
     elif 'D' in gran:
         tasks = [runLoop_days(symbol, gran=gran, semaphore=semaphore, loops=loops, separate=separate) for symbol in symbols]
     dfs = await tqdm_asyncio.gather(*tasks, desc = 'Fetching Price Data')
-    df = pd.concat(dfs, axis = 1)
+    df = pd.concat(dfs, axis = 1).dropna(how = 'any', axis = 1)
     
     if save:
         df.to_csv(f'Output/hist_candles_{gran}.csv')
     return df
 
-
-
-
-def getZcores(candles: pd.DataFrame, highCorr: list) -> pd.DataFrame:
-    """Build z-scores for each CoinA-CoinB column. Robust to NaNs."""
-    zscores = []
-    for r in highCorr:
-        coinPair = candles[[r.CoinA, r.CoinB]].copy()
-        spread = coinPair[r.CoinA] - coinPair[r.CoinB]
-        spread_mean = spread.rolling(5, min_periods=5).mean()
-        sigma = spread_mean.rolling(30, min_periods=30).std()
-        zscore = (spread - spread_mean) / sigma
-        col_name = f"{r.CoinA}-{r.CoinB}"
-        zscores.append(zscore.rename(col_name))
-
-    zscores_df = pd.concat(zscores, axis=1)
 
 class Load():
     def __init__(self, symbols, gran, loops, separate = False, save = False):
@@ -141,16 +125,20 @@ class Load():
         symbols = df
         if save:
             symbols.to_csv('Output/high_corr_symbols.csv', index=False)
+
+        self.corr = symbols
         return symbols
     
     def cointegrate(self, BASE_UNITS_A = None, BASE_NOTIONAL_A = 20.0, MAX_KEEP = 200, MIN_OBS = 50, PVAL_THRESH = 0.05):
         
         highCorr = self.correlate()
+        candles = self.candles.xs('close', 1, 1)
         results = []
+
         pbar = tqdm(total=MAX_KEEP, desc="Processing zlimits pairs")
         for r in highCorr.itertuples(index=False):
-            sA = self.candles[r.CoinA].astype(float)
-            sB = self.candles[r.CoinB].astype(float)
+            sA = candles[r.CoinA].astype(float)
+            sB = candles[r.CoinB].astype(float)
 
             pair = pd.concat([sA, sB], axis=1, keys=['A','B']).dropna()
             if len(pair) < MIN_OBS:
@@ -214,8 +202,40 @@ class Load():
 
         results_candles = pd.DataFrame(results)#.sort_values('p_value')
         results_candles.to_csv('Output/zlimSymbols.csv', index=False)
+
+        self.coint = results_candles
         
         return results_candles
+
+
+        
+    
+    def getZscores(self, method:str, rolling_spread = 5, rolling_spreadMean = 30) -> pd.DataFrame:
+        """Build z-scores for each CoinA-CoinB column. Robust to NaNs."""
+        candles = self.candles.xs('close', 1, 1)
+        
+        if method == 'correlate':
+            highCorr = self.correlate()
+        elif method == 'cointegrate':
+            highCorr = self.cointegrate()
+
+        else:
+            raise Exception('Choose between: cointegrate or correlate')
+        zscores = []
+        for r in highCorr.itertuples():
+            coinPair = candles[[r.CoinA, r.CoinB]].copy()
+            spread = coinPair[r.CoinA] - coinPair[r.CoinB]
+            spread_mean = spread.rolling(rolling_spread, min_periods=rolling_spread).mean()
+            sigma = spread_mean.rolling(rolling_spreadMean, min_periods=rolling_spreadMean).std()
+            zscore = (spread - spread_mean) / sigma
+            col_name = f"{r.CoinA}-{r.CoinB}"
+            zscores.append(zscore.rename(col_name))
+    
+        zscores_df = pd.concat(zscores, axis=1)
+
+        self.zscores = zscores_df
+
+        return zscores_df
     
 if __name__ == '__main__':
 
