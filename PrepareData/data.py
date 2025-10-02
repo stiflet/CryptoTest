@@ -120,7 +120,7 @@ class Load():
     def correlate(self, save: bool = False):
         dfCorr = self.candles.xs('close', 1, 1).corr()    
         np.fill_diagonal(dfCorr.values, 0)
-        df = pd.DataFrame(dfCorr.where(dfCorr > 0.9).stack().index.tolist(), columns=['CoinA', 'CoinB'])
+        df = pd.DataFrame(dfCorr.where(dfCorr > 0).stack().index.tolist(), columns=['CoinA', 'CoinB'])
         symbols = df
         if save:
             symbols.to_csv('Output/high_corr_symbols.csv', index=False)
