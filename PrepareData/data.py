@@ -9,59 +9,13 @@ from tqdm.asyncio import tqdm_asyncio
 from tqdm import tqdm
 import statsmodels.api as sm
 from statsmodels.tsa.stattools import coint
-from math import ceil
 
 os.makedirs('Output', exist_ok=True)
 def runAsync(function):
     def wrapper(*args, **kwargs):
         return asyncio.run(function(*args, **kwargs))
     return wrapper
-    
-def run_async(function):
-  def wrapper(*args, **kwargs):
-    return asyncio.run(function(*args, **kwargs))
 
-  return wrapper
-
-async def fetch_fundingRates(ses, symbol, iter):
-  
-
-  response = await ses.get(f'https://api.bitget.com/api/v3/market/history-fund-rate?pageSize=100&category=USDT-FUTURES&symbol={symbol}&cursor={iter}')
-  response = response.json()
-  return pd.DataFrame(response.get('data').get('resultList'))
-
-
-
-@run_async
-async def get_fundingRates(candles_iters, symbols):
-  
-  dfs = []
-  iters = ceil((candles_iters*200/8)/20) + 1
-  async with AsyncSession() as ses:
-    for symbol in symbols:
-      tasks = []
-      for i in range(1, iters):
-        tasks.append(fetch_fundingRates(ses, symbol, i))
-      result = await tqdm.gather(*tasks)
-
-      dfs.append(pd.concat(result))
-
-    df = pd.concat(dfs, axis = 0)
-    df.fundingRateTimestamp = pd.to_datetime(df.fundingRateTimestamp, unit='ms')
-    df.fundingRate = pd.to_numeric(df.fundingRate)
-    df.set_index('fundingRateTimestamp', inplace = True)
-    df.sort_index(ascending=False)
-
-
-    df.sort_index(ascending=True, inplace = True)
-    df.index.name = 'date'
-
-
-    df = df.pivot_table(index = 'date', columns = 'symbol', values = 'fundingRate')
-
-
-
-  return df
 
 def getSymbols(minVol: int, save:bool = False):
     url = 'https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES'
@@ -76,12 +30,18 @@ def getSymbols(minVol: int, save:bool = False):
     return df
 
 
-async def getData(session, symbol, gran, startTime, endTime, semaphore, limit=200, market = 'usdt-futures') -> pd.DataFrame:
+async def getData(session, symbol, gran, startTime, endTime, semaphore, market, limit=200) -> pd.DataFrame:
     
     
+    if market == 'futures':
+      url = f'https://api.bitget.com/api/v2/mix/market/history-candles?symbol={symbol}&granularity={gran}&limit={limit}&productType=usdt-futures&'+ \
+          f'startTime={int(startTime.timestamp() * 1000)}&endTime={int(endTime.timestamp() * 1000)}'
 
-    url = f'https://api.bitget.com/api/v2/mix/market/history-candles?symbol={symbol}&granularity={gran}&limit={limit}&productType={market}&'+ \
-        f'startTime={int(startTime.timestamp() * 1000)}&endTime={int(endTime.timestamp() * 1000)}'
+    if market == 'spot':
+      url = f'https://api.bitget.com/api/v2/spot/market/history-candles?symbol={symbol}&granularity={gran}&limit={limit}&'+ \
+          f'startTime={int(startTime.timestamp() * 1000)}&endTime={int(endTime.timestamp() * 1000)}'
+
+        
     async with semaphore:
         retries = 0
         while retries < 5:
@@ -93,20 +53,25 @@ async def getData(session, symbol, gran, startTime, endTime, semaphore, limit=20
             break
     return pd.DataFrame(response.json()['data'])
 
-async def runLoop_hours(symbol, gran, semaphore, loops, separate: bool = False) -> pd.DataFrame:
+async def runLoop_hours(symbol, gran, semaphore, loops,  market, separate: bool = False) -> pd.DataFrame:
     async with AsyncSession() as session:
         tasks = []
         endTime = datetime.now()
         startTime = endTime - timedelta(hours=200)
         for _ in range(loops):
-            tasks.append(getData(session, symbol, gran, startTime, endTime, semaphore))
+            tasks.append(getData(session, symbol, gran, startTime, endTime, semaphore, market))
             endTime = startTime
             startTime = endTime - timedelta(hours=200)
             
         dfs = await asyncio.gather(*tasks)
 
     df = pd.concat(dfs, axis = 0)
-    df.columns = ['date', 'open', 'high', 'low', 'close', 'volume', 'volumeQuote']
+    if market == 'futures':
+      df.columns = ['date', 'open', 'high', 'low', 'close', 'volume', 'volumeQuote']
+
+    if market == 'spot':
+      df.columns = ['date', 'open', 'high', 'low', 'close', 'tradingVolume', 'tradingVolumeUSDT', 'volumeQuote']
+
     df = df.apply(pd.to_numeric)
     df['date'] = pd.to_datetime(df['date'], unit='ms')
     df.set_index('date', inplace = True)
@@ -117,13 +82,13 @@ async def runLoop_hours(symbol, gran, semaphore, loops, separate: bool = False) 
         df.to_csv(f'Output/{symbol}_{gran}.csv', index = False)
     return df
 
-async def runLoop_days(symbol, gran, semaphore, loops, separate: bool = False) -> pd.DataFrame:
+async def runLoop_days(symbol, gran, semaphore, loops, market, separate: bool = False) -> pd.DataFrame:
     async with AsyncSession() as session:
         tasks = []
         endTime = datetime.now()
         startTime = endTime - timedelta(days=50)
         for _ in range(loops):
-            tasks.append(getData(session, symbol, gran, startTime, endTime, semaphore))
+            tasks.append(getData(session, symbol, gran, startTime, endTime, semaphore, market))
             endTime = startTime
             startTime = endTime - timedelta(days=50)
 
@@ -147,12 +112,12 @@ async def runLoop_days(symbol, gran, semaphore, loops, separate: bool = False) -
     return df
 
 @runAsync
-async def getHistCandles(symbols, gran, loops=5, separate: bool = False, save: bool = True) -> pd.DataFrame:
+async def getHistCandles(symbols, gran, loops=5, market='future', separate: bool = False, save: bool = True) -> pd.DataFrame:
     semaphore = asyncio.Semaphore(5)
-    if 'H' in gran:
-        tasks = [runLoop_hours(symbol, gran=gran, semaphore=semaphore, loops=loops, separate=separate) for symbol in symbols]
+    if ('H' in gran) or ('h' in gran):
+        tasks = [runLoop_hours(symbol, gran=gran, semaphore=semaphore, loops=loops, market = market, separate=separate) for symbol in symbols]
     elif 'D' in gran:
-        tasks = [runLoop_days(symbol, gran=gran, semaphore=semaphore, loops=loops, separate=separate) for symbol in symbols]
+        tasks = [runLoop_days(symbol, gran=gran, semaphore=semaphore, loops=loops, market = market, separate=separate) for symbol in symbols]
     dfs = await tqdm_asyncio.gather(*tasks, desc = 'Fetching Price Data')
     df = pd.concat(dfs, axis = 1).dropna(how = 'any', axis = 1)
     
@@ -162,8 +127,8 @@ async def getHistCandles(symbols, gran, loops=5, separate: bool = False, save: b
 
 
 class Load():
-    def __init__(self, symbols, gran, loops, market = 'usdt-futures', separate = False, save = False):
-        self.candles = getHistCandles(symbols, gran, loops, separate, save)
+    def __init__(self, symbols, gran, loops, market, separate = False, save = False):
+        self.candles = getHistCandles(symbols, gran, loops, market, separate, save)
         
         
     def correlate(self, save: bool = False):
@@ -287,7 +252,7 @@ class Load():
     
 if __name__ == '__main__':
 
-    btc = Load(['BTCUSDT', 'ETHUSDT'], gran='1H', loops=2)
+    btc = Load(['BTCUSDT', 'ETHUSDT'], gran='1h', loops=2, market = 'spot')
     print(btc.candles)
     
-    print(btc.cointegrate())
+
