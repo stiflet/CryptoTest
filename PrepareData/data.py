@@ -30,8 +30,11 @@ def getSymbols(minVol: int, save:bool = False):
     return df
 
 
-async def getData(session, symbol, gran, startTime, endTime, semaphore, limit=200) -> pd.DataFrame:
-    url = f'https://api.bitget.com/api/v2/mix/market/history-candles?symbol={symbol}&granularity={gran}&limit={limit}&productType=usdt-futures&'+ \
+async def getData(session, symbol, gran, startTime, endTime, semaphore, limit=200, market = 'usdt-futures') -> pd.DataFrame:
+    
+    
+
+    url = f'https://api.bitget.com/api/v2/mix/market/history-candles?symbol={symbol}&granularity={gran}&limit={limit}&productType={market}&'+ \
         f'startTime={int(startTime.timestamp() * 1000)}&endTime={int(endTime.timestamp() * 1000)}'
     async with semaphore:
         retries = 0
@@ -113,7 +116,7 @@ async def getHistCandles(symbols, gran, loops=5, separate: bool = False, save: b
 
 
 class Load():
-    def __init__(self, symbols, gran, loops, separate = False, save = False):
+    def __init__(self, symbols, gran, loops, market = 'usdt-futures', separate = False, save = False):
         self.candles = getHistCandles(symbols, gran, loops, separate, save)
         
         
