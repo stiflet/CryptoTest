@@ -9,12 +9,75 @@ from tqdm.asyncio import tqdm_asyncio
 from tqdm import tqdm
 import statsmodels.api as sm
 from statsmodels.tsa.stattools import coint
+from math import ceil
 
-os.makedirs('Output', exist_ok=True)
 def runAsync(function):
     def wrapper(*args, **kwargs):
         return asyncio.run(function(*args, **kwargs))
     return wrapper
+
+
+async def fetch_fundingRates(ses, symbol, iter, sem):
+  try:
+    response = await ses.get(f'https://api.bitget.com/api/v3/market/history-fund-rate?pageSize=100&category=USDT-FUTURES&symbol={symbol}&cursor={iter}')
+    response = response.json()
+    df = pd.DataFrame(response.get('data').get('resultList'))
+  except:
+    await asyncio.sleep(0.5)
+    return await fetch_fundingRates(ses, symbol, iter, sem)
+
+  return df
+
+
+
+@runAsync
+async def get_fundingRates(candles_iters, symbols):
+
+  dfs = []
+  iters = ceil((candles_iters*200/8)/20) + 1
+  async with asyncio.Semaphore(5) as sem:
+    async with AsyncSession() as ses:
+      for symbol in symbols:
+        tasks = []
+        for i in range(1, iters):
+          tasks.append(fetch_fundingRates(ses, symbol, i, sem))
+        result = await tqdm.gather(*tasks)
+
+        dfs.append(pd.concat(result))
+
+      df = pd.concat(dfs, axis = 0)
+      df.fundingRateTimestamp = pd.to_datetime(df.fundingRateTimestamp, unit='ms')
+      df.fundingRate = pd.to_numeric(df.fundingRate)
+      df.set_index('fundingRateTimestamp', inplace = True)
+      df.sort_index(ascending=False)
+
+
+      df.sort_index(ascending=True, inplace = True)
+      df.index.name = 'date'
+
+
+      df = df.pivot_table(index = 'date', columns = 'symbol', values = 'fundingRate')
+
+
+
+  return df
+
+
+
+def merge(futures, fundings):
+  merged = pd.merge_asof(
+      futures,
+      fundings,
+      left_index=True,
+      right_index=True,
+      direction='backward'
+  )
+
+  merged.columns = 'close funding'.split()
+
+  return merged
+os.makedirs('Output', exist_ok=True)
+
 
 
 def getSymbols(minVol: int, save:bool = False):
