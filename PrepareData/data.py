@@ -1,4 +1,3 @@
-# %load /kaggle/working/CryptoTest/PrepareData/data.py
 from curl_cffi.requests import AsyncSession
 from curl_cffi import requests
 import pandas as pd
