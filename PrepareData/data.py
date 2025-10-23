@@ -1,3 +1,4 @@
+# %load /kaggle/working/CryptoTest/PrepareData/data.py
 from curl_cffi.requests import AsyncSession
 from curl_cffi import requests
 import pandas as pd
@@ -52,7 +53,34 @@ async def getData(session, symbol, gran, startTime, endTime, semaphore, market, 
                 continue
             break
     return pd.DataFrame(response.json()['data'])
+async def runLoop_minutes(symbol, gran, semaphore, loops,  market, separate: bool = False) -> pd.DataFrame:
+    async with AsyncSession() as session:
+        tasks = []
+        endTime = datetime.now()
+        startTime = endTime - timedelta(minutes=200)
+        for _ in range(loops):
+            tasks.append(getData(session, symbol, gran, startTime, endTime, semaphore, market))
+            endTime = startTime
+            startTime = endTime - timedelta(minutes=200)
+            
+        dfs = await asyncio.gather(*tasks)
 
+    df = pd.concat(dfs, axis = 0)
+    if market == 'futures':
+      df.columns = ['date', 'open', 'high', 'low', 'close', 'volume', 'volumeQuote']
+
+    if market == 'spot':
+      df.columns = ['date', 'open', 'high', 'low', 'close', 'tradingVolume', 'tradingVolumeUSDT', 'volumeQuote']
+
+    df = df.apply(pd.to_numeric)
+    df['date'] = pd.to_datetime(df['date'], unit='ms')
+    df.set_index('date', inplace = True)
+    df.sort_values('date', inplace = True)
+    df.columns = pd.MultiIndex.from_product([[symbol], df.columns])
+    
+    if separate:
+        df.to_csv(f'Output/{symbol}_{gran}.csv', index = False)
+    return df
 async def runLoop_hours(symbol, gran, semaphore, loops,  market, separate: bool = False) -> pd.DataFrame:
     async with AsyncSession() as session:
         tasks = []
@@ -114,10 +142,15 @@ async def runLoop_days(symbol, gran, semaphore, loops, market, separate: bool = 
 @runAsync
 async def getHistCandles(symbols, gran, loops=5, market='future', separate: bool = False, save: bool = True) -> pd.DataFrame:
     semaphore = asyncio.Semaphore(5)
-    if ('H' in gran) or ('h' in gran):
+    
+    if 'm' in gran:
+        tasks = [runLoop_minutes(symbol, gran=gran, semaphore=semaphore, loops=loops, market = market, separate=separate) for symbol in symbols]
+    elif ('H' in gran) or ('h' in gran):
         tasks = [runLoop_hours(symbol, gran=gran, semaphore=semaphore, loops=loops, market = market, separate=separate) for symbol in symbols]
     elif 'D' in gran:
         tasks = [runLoop_days(symbol, gran=gran, semaphore=semaphore, loops=loops, market = market, separate=separate) for symbol in symbols]
+
+    
     dfs = await tqdm_asyncio.gather(*tasks, desc = 'Fetching Price Data')
     df = pd.concat(dfs, axis = 1).dropna(how = 'any', axis = 1)
     
@@ -251,8 +284,9 @@ class Load():
         return zscores_df
     
 if __name__ == '__main__':
-
-    btc = Load(['BTCUSDT', 'ETHUSDT'], gran='1h', loops=2, market = 'spot')
+    import nest_asyncio
+    nest_asyncio.apply()
+    btc = Load(['BTCUSDT',], gran='1min', loops=2, market = 'spot')
     print(btc.candles)
     
 
