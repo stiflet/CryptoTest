@@ -41,7 +41,7 @@ async def get_fundingRates(candles_iters, symbols):
         tasks = []
         for i in range(1, iters):
           tasks.append(fetch_fundingRates(ses, symbol, i, sem))
-        result = await tqdm.gather(*tasks)
+        result = await tqdm_asyncio.gather(*tasks)
 
         dfs.append(pd.concat(result))
 
