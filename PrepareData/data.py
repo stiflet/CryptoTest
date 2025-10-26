@@ -16,7 +16,43 @@ def runAsync(function):
         return asyncio.run(function(*args, **kwargs))
     return wrapper
 
+def zscores(
+    df: pd.DataFrame,
+    target_col: str,
+    train_size,
+    corr_limit: float = 0.8,
+    rolling_spread: int = 60,
+    rolling_spreadMean: int = 60,
+    method: str = "pearson",
+    use_abs: bool = True
+) -> tuple[pd.DataFrame, pd.Series]:
+    num = df.select_dtypes(include=[np.number])[:train_size].copy()
+    if target_col not in num.columns:
+        raise KeyError(f"{target_col} not found among numeric columns.")
 
+    # Compute correlations
+    corrs_all = num.corr(method=method)[target_col].dropna()
+    if use_abs:
+        keep = corrs_all.index[(corrs_all.index != target_col) & (corrs_all.abs() >= corr_limit)]
+    else:
+        keep = corrs_all.index[(corrs_all.index != target_col) & (corrs_all >= corr_limit)]
+
+    kept_corrs = corrs_all.loc[keep].sort_values(key=np.abs, ascending=False)
+
+    zscores = {}
+    for col in kept_corrs.index:
+        a = num[target_col]
+        b = num[col]
+        spread = a - b
+
+        spread_mean = spread.rolling(rolling_spread, min_periods=rolling_spread).mean()
+        sigma = spread_mean.rolling(rolling_spreadMean, min_periods=rolling_spreadMean).std()
+        zscore = (spread - spread_mean) / sigma
+
+        zscores[f"{target_col}-{col}"] = zscore
+
+    z_df = pd.DataFrame(zscores, index=df.index)
+    return z_df, kept_corrs
 async def fetch_fundingRates(ses, symbol, iter, sem):
   try:
     response = await ses.get(f'https://api.bitget.com/api/v3/market/history-fund-rate?pageSize=100&category=USDT-FUTURES&symbol={symbol}&cursor={iter}')
