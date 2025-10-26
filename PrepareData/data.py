@@ -16,7 +16,7 @@ def runAsync(function):
         return asyncio.run(function(*args, **kwargs))
     return wrapper
 
-def zscores(
+def GetZscores(
     df: pd.DataFrame,
     target_col: str,
     train_size,
